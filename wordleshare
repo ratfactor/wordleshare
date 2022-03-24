@@ -1,0 +1,180 @@
+#!/usr/bin/perl
+
+use strict;
+use warnings;
+use Fcntl qw( SEEK_SET );
+
+my $file = 'wordle.txt';
+my $script_loc = '/cgi-bin/wordleshare';
+
+# CGI Stuff!
+my $method       = uc $ENV{'REQUEST_METHOD'};
+my $query_string = $ENV{'QUERY_STRING'};
+my $content_len  = $ENV{'CONTENT_LENGTH'};
+
+# if it's a POST, let's get the data from stdin
+if ($method eq 'POST') {
+	my $max_post = 500; # 500 byte limit!
+
+	if ($content_len > $max_post) {
+		print qq(Status: 400 Nope
+
+			<h2>400 Nope</h2>
+			<p>You tried to POST too much info! I only accept 500 bytes! This is for sharing Wordle results!</p>
+		);
+		exit;
+	}
+
+    # Read POST body
+    my $post_content = '';
+	read (STDIN, $post_content, $content_len);
+    # URL decode (solution third-hand via "webmin libraries" - but fixed (c -> C)
+    $post_content =~ s/^name=//;
+    $post_content =~ s/&paste=/: /;
+    $post_content =~ s/&comment=/;/;
+    $post_content =~ s/\+/ /g;
+    $post_content =~ s/%(..)/pack("C",hex($1))/ge;
+    $post_content =~ s/\r?\n/;/g; # convert newlines to ';', apparently clipboard gives us \r\n
+
+    open (my $fh, '>>', $file) or die "Status: 500 Damn\n\nSorry, couldn't write to text file. :-(\n";
+
+
+    print $fh "$post_content\n";
+    close $fh;
+
+    # Redirect to self! (Or else a browser refresh will try to POST again.)
+    print "Status: 302 Found\nLocation: $script_loc\n\n";
+    exit;
+}
+
+
+# Show LATEST results - (highest Wordle number)
+my @stuff;
+open (my $fh, '<', $file) or die "Status: 500 Internal Server Error\n\nSorry, couldn't read text file. :-(\n";
+
+# SCAN 1: get the highest wordle number
+my $highest = 0;
+while (<$fh>) {
+    if($_ =~ /Wordle (\d+)/)
+    {
+        $highest = $1 if $1 > $highest;
+    }
+}
+
+# SCAN 2: get those highest ones...
+seek $fh, 0, SEEK_SET; # zero bytes, absolute position
+while (<$fh>) {
+    if($_ =~ /Wordle (\d+)/ and $1 == $highest)
+    {
+        $_ =~ s/;/\n/g;
+        $_ =~ s/\xE2\xAC\x9C/\xE2\xAC\x9B/g; #light theme to dark theme
+        $_ =~ s/</&lt;/g;
+        $_ =~ s/>/&gt;/g;
+        push(@stuff, $_);
+    }
+}
+
+close $fh;
+
+print qq(
+<!doctype HTML>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	<link rel="icon" href="/images/favicon.png" type="image/png">
+	<title>Wordleshare</title>
+    <style>
+        pre {
+            background-color: transparent;
+            line-height: 1.2em;
+            font-size: x-large;
+            letter-spacing: 3px;
+            white-space: pre-wrap;
+            border: 1px solid silver;
+        }
+        textarea {
+            width: 200px;
+            height: 150px;
+            line-height: 1.2em;
+            letter-spacing: 3px;
+        }
+        .error {
+            background-color: red;
+            color: white;
+            font-size: 1.5em;
+        }
+        input[name=comment] { width: 100%; }
+    </style>
+</head>
+<body>
+
+<h1>Wordleshare</h1>
+
+<form id="theform" method="POST">
+    Your name (whatever you want!):<br>
+    <input type="text" name="name">
+    <div id="error_name" class="error"></div>
+    Paste verbatim Wordle share block here:
+    <textarea name="paste"></textarea>
+    <div id="error_paste" class="error"></div>
+    Comment (optional):<br>
+    <input type="text" name="comment">
+    <br>
+    <input type="submit">
+</form>
+);
+
+for my $entry (@stuff) {
+    print qq(<pre class="entry">$entry</pre>);
+}
+
+print qq(<script>
+// Form validation
+document.getElementById("theform").addEventListener('submit', function checksubmit(event){
+    function do_error(event, error_display, error_text){
+        error_display.style.display = "block";
+        error_display.innerText     = error_text;
+        event.preventDefault();
+    }
+
+    var name  = document.querySelector("[name=name]").value;
+    var paste = document.querySelector("[name=paste]").value;
+
+    var error_name  = document.getElementById("error_name");
+    var error_paste = document.getElementById("error_paste");
+    error_name.style.display  = "none";
+    error_paste.style.display = "none";
+
+    if (name.length < 1) {
+        do_error(event, error_name, "Please provide a name.");
+    }
+
+    if (paste.length < 1) {
+        do_error(event, error_paste, "Please paste your Wordle share block.");
+    }
+
+    if (paste.length > 0 && !paste.includes("Wordle")) {
+        do_error(event, error_paste, "The pasted share block didn't include 'Wordle', so it can't be right. Please try pasting again.");
+    }
+});
+
+// Add copy button to each output
+document.querySelectorAll('pre.entry').forEach(function(elem){
+    // IMPORTANT: get text BEFORE appending copy button
+    var txt = elem.textContent;
+    var b = document.createElement('button');
+    b.textContent = "copy";
+    b.style.float = "right";
+    b.addEventListener('click', function(event){
+        var ta = document.createElement('textarea');
+        ta.value = txt;
+        elem.after(ta);
+    });
+    elem.appendChild(b);
+});
+
+</script>
+</body></html>
+);
+
