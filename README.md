@@ -1,6 +1,6 @@
 # Wordleshare
 
-A zero-security old-school CGI Wordle sharing page
+A zero-security old-school CGI Wordle sharing page written in 100% Perl 5 with no libraries.
 
 ![screenshot of wordleshare](https://ratfactor.com/images/wordleshare/wordleshare_sm.png)
 
